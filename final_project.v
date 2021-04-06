@@ -1,6 +1,3 @@
-//IMPORTANT: NEED TO MAKE EVERYTHING SIGNED
-//need to finish instantiating the echo 
-//need to update the top module so that it has a state machine for adding in the echo
 module final_project(
 input i_clk,
 input i_rst_n,
@@ -12,10 +9,16 @@ inout io_ADU_DACLRCK,
 input i_AUD_ADCDAT,
 inout io_ADCLRCK,
 output o_I2C_SCLK,
-inout io_I2C_SDAT
+inout io_I2C_SDAT,
 
+input i_echo_en, //route to a switch to turn on or off enable for echo
+output reg [3:0] debug
 );
 
+always@(posedge i_clk)
+begin
+debug <= r_SM_L;
+end
 //48khz sampling rate w/ 50 mhz clk --> ~1k clock cycles to work with
 //read from source, write to sink
 
@@ -29,17 +32,17 @@ wire w_r_src_DV;
 wire [23:0] w_r_src_data;
 
 //sink wires (write audio out)
-reg [23:0] r_l_snk_data;
+reg signed [23:0] r_l_snk_data;
 reg r_l_snk_DV;
 wire r_l_snk_rdy;
 
-reg [23:0] r_r_snk_data;
+reg signed [23:0] r_r_snk_data;
 reg r_r_snk_DV;
-wire l_r_snk_rdy;
+wire r_r_snk_rdy;
 
 //for now route input data to output data to verify functionality
 //loopback test
-always@(posedge i_clk)
+/*always@(posedge i_clk)
 begin
 r_l_src_rdy <= 1;
 r_r_src_rdy <= 1;
@@ -57,10 +60,97 @@ end
 else begin 
 	r_l_snk_data <= r_l_snk_data;
 	r_l_snk_DV <= 0; end
+end
+*/
+parameter IDLE = 0;
+parameter COMPUTE = 1;
 
+reg [3:0] r_SM_L;
+reg [3:0] r_SM_R;
+reg [23:0] r_L_in;
+reg [23:0] r_R_in;
+reg r_R_DV;
+reg r_L_DV;
+reg signed [23:0] r_in_data_hold_L;
+reg signed  [23:0] r_in_data_hold_R;
+wire signed [23:0] w_L_echo_out;
+wire signed [23:0] w_R_echo_out;
+wire w_R_DV_echo;
+wire w_L_DV_echo;
+
+//SM for passing data to submodules
+
+//left side
+always@(posedge i_clk)
+begin
+if(~i_rst_n) begin /*reset regs*/ end
+else begin
+case (r_SM_L)
+IDLE: begin
+r_l_snk_DV <= 0;
+if(w_l_src_DV) begin
+r_in_data_hold_L <= w_l_src_data;
+r_L_in <= w_l_src_data;
+r_L_DV <= 1;
+r_l_src_rdy <= 0;
+r_SM_L <= COMPUTE; end
+else begin
+r_in_data_hold_L <= r_in_data_hold_L;
+r_L_in <= r_L_in;
+r_L_DV <= 0;
+r_l_src_rdy <= 1;
+r_SM_L <= r_SM_L; end end
+COMPUTE: begin
+r_L_DV <= 0;
+if(w_L_DV_echo) begin // this will need modified when other componenets are added in
+	if(i_echo_en) r_l_snk_data <= w_L_echo_out + r_in_data_hold_L; 
+	else r_l_snk_data <= r_in_data_hold_L;
+r_l_snk_DV <= 1;
+r_SM_L <= IDLE; end
+else begin
+r_l_snk_data <= r_l_snk_data;
+r_l_snk_DV <= 0;
+r_SM_L <= r_SM_L; end end
+default: begin /*add default */ end
+endcase
+end
 end
 
-
+//right side
+always@(posedge i_clk)
+begin
+if(~i_rst_n) begin /*reset regs*/ end
+else begin
+case (r_SM_R)
+IDLE: begin
+r_r_snk_DV <= 0;
+if(w_r_src_DV) begin
+r_in_data_hold_R <= w_r_src_data;
+r_R_in <= w_r_src_data;
+r_R_DV <= 1;
+r_r_src_rdy <= 0;
+r_SM_R <= COMPUTE; end
+else begin
+r_in_data_hold_R <= r_in_data_hold_R;
+r_R_in <= r_R_in;
+r_R_DV <= 0;
+r_r_src_rdy <= 1;
+r_SM_R <= r_SM_R; end end
+COMPUTE: begin
+r_R_DV <= 0;
+if(w_R_DV_echo) begin // this will need modified when other componenets are added in
+	if(i_echo_en) r_r_snk_data <= w_R_echo_out + r_in_data_hold_R; 
+	else r_r_snk_data <= r_in_data_hold_R;
+r_r_snk_DV <= 1;
+r_SM_R <= IDLE; end
+else begin
+r_r_snk_data <= r_r_snk_data;
+r_r_snk_DV <= 0;
+r_SM_R <= r_SM_R; end end
+default: begin /*add default */ end
+endcase
+end
+end
 soc_system u0 (
 		.clk_clk                                          (i_clk),                                          //                                         clk.clk
 		.reset_reset_n                                    (i_rst_n),                                    //                                       reset.reset_n
@@ -87,12 +177,26 @@ soc_system u0 (
 		.audio_0_external_interface_DACLRCK               (io_ADU_DACLRCK)                //                                            .DACLRCK
 	);
 
-//instantiate the echo:
+//instantiate the left echo: 
 echo ech0(
-.i_clk (),
-.i_rst_n (),
-//LEFT OFF DOING THIS
+.i_clk (i_clk),
+.i_rst_n (i_rst_n),
+.i_data (r_L_in),
+.i_DV (r_L_DV),
+.o_echo_out (w_L_echo_out),
+.o_echo_DV (w_L_DV_echo)
 	);
+
+//instantiate the right echo:
+echo ech1(
+.i_clk (i_clk),
+.i_rst_n (i_rst_n),
+.i_data (r_R_in),
+.i_DV (r_R_DV),
+.o_echo_out (w_R_echo_out),
+.o_echo_DV (w_R_DV_echo)
+	);
+
 
 endmodule
 
@@ -100,39 +204,39 @@ module echo(
 input i_clk,
 input i_rst_n,
 
-input [23:0] i_data_L,
-input [23:0] i_data_R,
-input i_L_DV,
-input i_R_DV,
+input [23:0] i_data,
+input i_DV,
 
-output reg signed [23:0] o_echo_L,
-output [23:0] o_echo_R,
-output o_L_DV,
-output o_R_DV
+output reg signed [23:0] o_echo_out,
+output reg o_echo_DV
 
 );
 reg [15:0] r_data_ptr = 16'd0;
-reg [15:0] r_echo_ptr = 16'd12000;
+reg [15:0] r_echo_ptr = 16'd1;
 reg r_we;
 reg [23:0] r_buf_data;
-wire [23:0] w_buf_data;
+wire signed [23:0] w_buf_data;
 reg [15:0] r_addr;
 reg [3:0] r_SM0;
 reg signed [23:0] r_echo_L_hold;
 
+parameter IDLE = 0;
+parameter WRITE_READ = 1;
+parameter NEXT = 3;
+parameter SEND_OUT = 4;
 //delay of .5 seconds: Fs = 48000, delay = .5, buffer length = 48000 * .5 = 24000
 //delay gain of .5
 //process: new sample comes in, write it to data_ptr, take sample from echo ptr, multiply by gain, send out and DV, update both ptrs
 always@(posedge i_clk)
 begin
-o_L_DV <= 0;
+o_echo_DV <= 0;
 case(r_SM0)
 IDLE: begin
-if(i_L_DV) begin 
-	r_SM0 <= WRITE_NEW; 
+if(i_DV) begin 
+	r_SM0 <= WRITE_READ; 
 	r_we <= 1; 
 	r_addr <= r_data_ptr;
-	r_buf_data <= i_data_L;
+	r_buf_data <= i_data;
 	end
 else begin 
 	r_SM0 <= r_SM0;
@@ -149,13 +253,15 @@ end
 NEXT:begin
 r_echo_L_hold <= w_buf_data;
 r_we <= 0; 
-r_echo_ptr <= r_echo_ptr + 1; 
-r_data_ptr <= r_data_ptr + 1; 
+if(r_echo_ptr == 16'd23999) r_echo_ptr <= 16'd0;
+else r_echo_ptr <= r_echo_ptr + 1; 
+if(r_data_ptr == 16'd23999) r_data_ptr <= 16'd0;
+else r_data_ptr <= r_data_ptr + 1; 
 r_SM0 <= SEND_OUT;
 end
 SEND_OUT:begin
-o_echo_L <= r_echo_L_hold / 2; 
-o_L_DV <= 1; 
+o_echo_out <= w_buf_data / 2;// / 2; //gain of .5
+o_echo_DV <= 1; 
 r_SM0 <= IDLE;
 end
 default: begin
@@ -165,9 +271,6 @@ r_addr <= r_addr;
 r_buf_data <= r_buf_data;
 end
 endcase
-
-//repeat for R side of audio, can change the delay offset from L for stereo echo effect
-
 
 end
 
@@ -191,11 +294,12 @@ module single_port_ram
 );
 
 	// Declare the RAM variable
-	reg [23:0] ram[0:24000];  // need 1024 samples
+	reg [23:0] ram[0:23999];  // need 1024 samples
 
 	// Variable to hold the registered read address
 	reg [15:0] addr_reg;
 	
+
 	always @ (posedge clk)
 	begin
 	// Write
