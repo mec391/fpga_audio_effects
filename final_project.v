@@ -4,6 +4,9 @@
 //implement multi tap echo effect to echo, stereo ping pong effect
 //implement chorus effect (delay of .02 seconds to 0.03 seconds, cycling at .01Hz + delay of .02 to .05, .02Hz)
 //fir low pass filter
+
+//LEFTMOST SWITCHEST (SW8 & SW9) CONTROL AUDIO EFFECT ENABLE FOR CHROUS AND ECHO
+
 module final_project(
 input i_clk,
 input i_rst_n,
@@ -18,7 +21,7 @@ output o_I2C_SCLK,
 inout io_I2C_SDAT,
 
 input i_echo_en, //route to a switch to turn on or off enable for echo
-input i_chorus_en, //NEEDS ROUTED TO SWITCH!
+input i_chorus_en, 
 output reg [3:0] debug
 );
 
