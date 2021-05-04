@@ -427,7 +427,7 @@ READ1:begin //apply 1 clk cycle delay
 r_SM0 <= READ2;
 end
 READ2:begin //reg ptr1 data, move addr to the ptr_2 //apply gain of .5
-r_ptr_data1 <= w_buf_data /*>>> 1*/;
+r_ptr_data1 <= w_buf_data >>> 1;
 r_addr <= r_delay_ptr2;
 r_SM0 <= READ3;
 end
@@ -435,7 +435,7 @@ READ3:begin
 r_SM0 <= READ4;
 end
 READ4:begin //reg ptr2 data, apply gain of .5
-r_ptr_data2 <= w_buf_data /*>>> 1*/;
+r_ptr_data2 <= w_buf_data >>> 1;
 r_SM0 <= READ5;
 end
 READ5:begin //assign output value, update all ptrs up and DV signals
