@@ -51,7 +51,125 @@ end
 endmodule
 
 
+module echo(
+input i_clk,
+input i_rst_n,
 
+input [23:0] i_data,
+input i_DV,
+
+output reg signed [23:0] o_echo_out = 0,
+output reg o_echo_DV
+
+);
+reg [15:0] r_data_ptr = 16'd0;  //data ptr is always 24000 samples ahead of echo_ptr
+reg [15:0] r_echo_ptr = 16'd1; //.5 second delay
+reg r_we;
+reg [23:0] r_buf_data;
+wire signed [23:0] w_buf_data = 0;
+reg [15:0] r_addr;
+reg [3:0] r_SM0;
+reg signed [23:0] r_echo_L_hold;
+
+parameter IDLE = 0;
+parameter WRITE_READ = 1;
+parameter NEXT = 3;
+parameter SEND_OUT = 4;
+//delay of .5 seconds: Fs = 48000, delay = .5, buffer length = 48000 * .5 = 24000
+//delay gain of .5
+//process: new sample comes in, write it to data_ptr, take sample from echo ptr, multiply by gain, send out and DV, update both ptrs
+always@(posedge i_clk)
+begin
+o_echo_DV <= 0;
+case(r_SM0)
+IDLE: begin
+if(i_DV) begin //got a DV from the top module, write to data_ptr by setting WE hi, addr to data_ptr, buffer_data to input_data
+	r_SM0 <= WRITE_READ; 
+	r_we <= 1; 
+	r_addr <= r_data_ptr;
+	r_buf_data <= i_data;
+	end
+else begin 
+	r_SM0 <= r_SM0;
+	r_we <= 0; 
+	r_addr <= r_addr; 
+	r_buf_data <= r_buf_data;
+	end
+end
+WRITE_READ:begin //toggle off the WE, move addr to the echo_ptr
+r_we <= 0; 
+r_addr <= r_echo_ptr; 
+r_SM0 <= NEXT;
+end
+NEXT:begin //increment up pointers
+r_we <= 0; 
+o_echo_out <= o_echo_out >>> 4; //apply feedback gain ahead of time
+if(r_echo_ptr == 16'd23999) r_echo_ptr <= 16'd0; 
+else r_echo_ptr <= r_echo_ptr + 1; 
+if(r_data_ptr == 16'd23999) r_data_ptr <= 16'd0;
+else r_data_ptr <= r_data_ptr + 1; 
+r_SM0 <= SEND_OUT;
+end
+SEND_OUT:begin //take the output from the buffer, apply gain of .5 and send out with a DV
+o_echo_out <= o_echo_out + (w_buf_data >>> 1);// / 2; //gain of .5 on the delay, gain of ..5 on the feedback
+o_echo_DV <= 1; 
+r_SM0 <= IDLE;
+end
+default: begin
+r_SM0 <= IDLE;
+r_we <= 0; 
+r_addr <= r_addr; 
+r_buf_data <= o_echo_out;
+end
+endcase
+
+end
+
+//instantiate the single port ram:
+single_port_ram spr0(
+.data (r_buf_data),
+.addr (r_addr),
+.we (r_we),
+.clk (i_clk),
+.q (w_buf_data)
+	);
+endmodule
+
+
+module single_port_ram //this infers BLOCK RAM
+(
+	input [23:0] data,
+	input [15:0] addr,
+	input we, clk,
+	output [23:0] q
+);
+
+	// Declare the RAM variable
+	reg [23:0] ram[0:23999];  // 
+
+	// Variable to hold the registered read address
+	reg [15:0] addr_reg;
+	
+
+	always @ (posedge clk)
+	begin
+	// Write
+		if (we)
+			ram[addr] <= data;
+		
+		addr_reg <= addr;
+		
+	end
+		
+	// Continuous assignment implies read returns NEW data.
+	// This is the natural behavior of the TriMatrix memory
+	// blocks in Single Port mode.  
+	assign q = ram[addr_reg];
+	
+endmodule
+
+//echo with no feedback and unity gain
+/*
 module echo(
 input i_clk,
 input i_rst_n,
@@ -167,3 +285,5 @@ module single_port_ram
 	assign q = ram[addr_reg];
 	
 endmodule
+
+*/
